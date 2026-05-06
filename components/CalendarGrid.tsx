@@ -56,7 +56,7 @@ export function CalendarGrid() {
   if (!activeBrand) return null;
 
   const activeBrandPosts = realPosts.filter(post => post.brandName?.trim().toLowerCase() === activeBrand.name?.trim().toLowerCase());
-  const springAnim = { type: "spring", stiffness: 300, damping: 30 };
+  const springAnim = { type: "spring", stiffness: 300, damping: 30 } as const;
 
   return (
     <div className="flex flex-col h-full bg-[#Fcfcfc] relative overflow-hidden">
