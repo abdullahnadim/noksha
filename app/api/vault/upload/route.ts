@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { getGoogleAuth } from '@/lib/google';
 import { Readable } from 'stream';
+
 export const dynamic = 'force-dynamic';
+
 // Helper function to find or create a Google Drive folder
 async function getOrCreateFolder(drive: any, folderName: string, parentId: string) {
   // Search for the folder by name inside the parent
@@ -49,7 +51,12 @@ export async function POST(request: Request) {
     const sheets = google.sheets({ version: 'v4', auth });
 
     // --- FOLDER ROUTING LOGIC ---
-    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    
+    // Safety check just in case the env variable is missing on Vercel
+    if (!rootFolderId) {
+      throw new Error("GOOGLE_DRIVE_FOLDER_ID environment variable is missing!");
+    }
     
     // 1. Get or Create the Brand Folder (e.g., "Happier")
     const targetBrandFolderId = await getOrCreateFolder(drive, brandName, rootFolderId);
@@ -106,9 +113,10 @@ export async function POST(request: Request) {
     const dateUploaded = new Date().toLocaleDateString();
     const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
     
+    // THE FIX: Changed range from A:G to A:H so all 8 columns fit perfectly!
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Asset_Vault!A:G',
+      range: 'Asset_Vault!A:H',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[assetId, brandId, uploaderName, file.name, downloadUrl, typeIcon, sizeInMB, dateUploaded]],
@@ -117,8 +125,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, assetId, downloadUrl });
 
-  } catch (error) {
-    console.error('Upload Error:', error);
-    return NextResponse.json({ error: 'Failed to process file' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Detailed Upload Error:', error);
+    
+    // THE ULTIMATE DEBUGGER: This will send the exact crash reason to your frontend red UI
+    return NextResponse.json(
+      { 
+        error: 'Failed to process file', 
+        details: error.message || 'Unknown server error occurred.' 
+      }, 
+      { status: 500 }
+    );
   }
 }
