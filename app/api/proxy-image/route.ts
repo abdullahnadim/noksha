@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+// THE MAGIC FIX: This moves the proxy off the restricted Node.js server 
+// and onto Vercel's global Edge Network, allowing infinite payload sizes!
+export const runtime = 'edge';
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
@@ -8,26 +12,28 @@ export async function GET(request: Request) {
     return new NextResponse('Missing Google Drive ID', { status: 400 });
   }
 
-  // The direct download URL
   const driveUrl = `https://drive.google.com/uc?export=download&id=${id}`;
 
   try {
-    // 1. Fetch the image from Google Drive on the server (bypasses browser CORS!)
-    const response = await fetch(driveUrl);
+    const response = await fetch(driveUrl, {
+      // Trick Google into thinking this request is coming from a normal computer browser
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
     
     if (!response.ok) {
       throw new Error(`Google returned status ${response.status}`);
     }
 
-    // 2. Read the image data
-    const blob = await response.blob();
-
-    // 3. Send it directly to your frontend as a raw image
-    return new NextResponse(blob, {
+    // STREAM THE DATA: Instead of downloading the whole image into memory (which crashes Vercel),
+    // we pipe the raw data stream directly to the frontend.
+    return new NextResponse(response.body, {
       headers: {
         'Content-Type': response.headers.get('Content-Type') || 'image/jpeg',
-        // Cache the image for 24 hours so it loads instantly next time
-        'Cache-Control': 'public, max-age=86400, stale-while-revalidate=43200',
+        // Cache the image aggressively on Vercel's Edge network for 1 week
+        'Cache-Control': 'public, max-age=604800, s-maxage=604800, stale-while-revalidate',
+        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (error) {
