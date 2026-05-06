@@ -14,6 +14,7 @@ export function AssetVault() {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   
   // THE MISSING GALLERY TOGGLE STATE
   const [viewMode, setViewMode] = useState<'unused' | 'gallery'>('unused'); 
@@ -89,25 +90,38 @@ export function AssetVault() {
 
     setIsUploading(true);
     setShowSuccess(false);
+    setUploadError(null); // Clear any old errors
     
     try {
-      const uploadPromises = Array.from(files).map(file => {
+      const uploadPromises = Array.from(files).map(async (file) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('brandId', activeBrand.id);
         formData.append('brandName', activeBrand.name);
         formData.append('uploaderName', 'Current User'); 
-        return fetch('/api/vault/upload', { method: 'POST', body: formData });
+        
+        const res = await fetch('/api/vault/upload', { method: 'POST', body: formData });
+        
+        // THE FIX: If the server returns an error code (400, 413, 500), FORCE it to throw an error!
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(errorText || `Server error: ${res.status}`);
+        }
+        return res;
       });
 
       await Promise.all(uploadPromises);
       setShowSuccess(true);
       fetchData();
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upload failed", error);
+      // Save the error message so we can show it on the UI
+      setUploadError(error.message || "Failed to upload file. It might be too large.");
     } finally { 
       setIsUploading(false); 
+      // Reset the file input so you can select the exact same file again to retry
+      e.target.value = ''; 
     }
   };
 
@@ -174,6 +188,13 @@ export function AssetVault() {
             <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
               <Loader2 size={32} className="text-blue-500 animate-spin mb-4" />
               <h3 className="text-sm font-bold text-gray-900">Uploading to Vault...</h3>
+            </motion.div>
+          ) : uploadError ? (
+            // --- THE NEW ERROR UI ---
+            <motion.div key="error" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center text-center">
+              <X size={36} className="text-red-500 mb-3" />
+              <h3 className="text-base font-bold text-red-700">Upload Failed</h3>
+              <p className="text-xs text-red-500 font-mono mt-1 max-w-[250px] break-words">{uploadError}</p>
             </motion.div>
           ) : showSuccess ? (
             <motion.div key="success" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
