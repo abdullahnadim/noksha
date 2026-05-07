@@ -5,24 +5,20 @@ import { Readable } from 'stream';
 
 export const dynamic = 'force-dynamic';
 
-// Helper function to find or create a Google Drive folder
 async function getOrCreateFolder(drive: any, folderName: string, parentId: string) {
-  // Search for the folder by name inside the parent
   const query = `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${parentId}' in parents and trashed=false`;
   
   const response = await drive.files.list({
     q: query,
     fields: 'files(id, name)',
     spaces: 'drive',
-    supportsAllDrives: true,           // <--- ADD THIS
-    includeItemsFromAllDrives: true,
+    supportsAllDrives: true,         // <-- REQUIRED FOR SHARED DRIVES
+    includeItemsFromAllDrives: true, // <-- REQUIRED FOR SHARED DRIVES
   });
 
   if (response.data.files && response.data.files.length > 0) {
-    // Folder exists, return its ID
     return response.data.files[0].id;
   } else {
-    // Folder doesn't exist, create it
     const folderMetadata = {
       name: folderName,
       mimeType: 'application/vnd.google-apps.folder',
@@ -31,6 +27,7 @@ async function getOrCreateFolder(drive: any, folderName: string, parentId: strin
     const folder = await drive.files.create({
       requestBody: folderMetadata,
       fields: 'id',
+      supportsAllDrives: true,       // <-- REQUIRED FOR SHARED DRIVES
     });
     return folder.data.id;
   }
@@ -41,7 +38,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const brandId = formData.get('brandId') as string;
-    const brandName = formData.get('brandName') as string; // We need the actual name for the folder
+    const brandName = formData.get('brandName') as string; 
     const uploaderName = formData.get('uploaderName') as string;
 
     if (!file || !brandId || !brandName) {
@@ -52,21 +49,15 @@ export async function POST(request: Request) {
     const drive = google.drive({ version: 'v3', auth });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // --- FOLDER ROUTING LOGIC ---
     const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!rootFolderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID is missing!");
     
-    // Safety check just in case the env variable is missing on Vercel
-    if (!rootFolderId) {
-      throw new Error("GOOGLE_DRIVE_FOLDER_ID environment variable is missing!");
-    }
-    
-    // 1. Get or Create the Brand Folder (e.g., "Happier")
+    // 1. Get/Create Brand Folder
     const targetBrandFolderId = await getOrCreateFolder(drive, brandName, rootFolderId);
 
-    // 2. Determine Category based on file type
+    // 2. Determine Category
     let categoryName = 'Documents';
     let typeIcon = 'archive';
-    
     if (file.type.includes('video') || file.name.endsWith('.mp4')) {
       categoryName = 'Videos';
       typeIcon = 'video';
@@ -75,10 +66,10 @@ export async function POST(request: Request) {
       typeIcon = 'design';
     }
 
-    // 3. Get or Create Category Folder (e.g., "Videos")
+    // 3. Get/Create Category Folder
     const targetCategoryFolderId = await getOrCreateFolder(drive, categoryName, targetBrandFolderId);
 
-    // 4. Optional Sub-category logic (e.g., if filename contains "reel")
+    // 4. Sub-category logic
     let finalDestinationId = targetCategoryFolderId;
     if (categoryName === 'Videos' && file.name.toLowerCase().includes('reel')) {
       finalDestinationId = await getOrCreateFolder(drive, 'Reels', targetCategoryFolderId);
@@ -92,24 +83,24 @@ export async function POST(request: Request) {
     const driveResponse = await drive.files.create({
       requestBody: {
         name: file.name,
-        parents: [finalDestinationId], // Uploading to the dynamically created folder!
+        parents: [finalDestinationId], 
       },
       media: {
         mimeType: file.type,
         body: stream,
       },
       fields: 'id, webContentLink',
-      supportsAllDrives: true,
+      supportsAllDrives: true,       // <-- REQUIRED FOR SHARED DRIVES
     });
 
     const fileId = driveResponse.data.id;
     const downloadUrl = driveResponse.data.webContentLink;
 
-    // Make the file downloadable for the team
+    // Permissions
     await drive.permissions.create({
       fileId: fileId!,
       requestBody: { role: 'reader', type: 'anyone' },
-      supportsAllDrives: true,
+      supportsAllDrives: true,       // <-- REQUIRED FOR SHARED DRIVES
     });
 
     // --- DATABASE LOGIC ---
@@ -117,7 +108,6 @@ export async function POST(request: Request) {
     const dateUploaded = new Date().toLocaleDateString();
     const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
     
-    // THE FIX: Changed range from A:G to A:H so all 8 columns fit perfectly!
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
       range: 'Asset_Vault!A:H',
@@ -131,13 +121,8 @@ export async function POST(request: Request) {
 
   } catch (error: any) {
     console.error('Detailed Upload Error:', error);
-    
-    // THE ULTIMATE DEBUGGER: This will send the exact crash reason to your frontend red UI
     return NextResponse.json(
-      { 
-        error: 'Failed to process file', 
-        details: error.message || 'Unknown server error occurred.' 
-      }, 
+      { error: 'Failed to process file', details: error.message || 'Unknown error' }, 
       { status: 500 }
     );
   }
