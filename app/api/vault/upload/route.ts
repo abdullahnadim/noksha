@@ -14,6 +14,8 @@ async function getOrCreateFolder(drive: any, folderName: string, parentId: strin
     q: query,
     fields: 'files(id, name)',
     spaces: 'drive',
+    supportsAllDrives: true,           // <--- ADD THIS
+    includeItemsFromAllDrives: true,
   });
 
   if (response.data.files && response.data.files.length > 0) {
@@ -97,6 +99,7 @@ export async function POST(request: Request) {
         body: stream,
       },
       fields: 'id, webContentLink',
+      supportsAllDrives: true,
     });
 
     const fileId = driveResponse.data.id;
@@ -106,6 +109,7 @@ export async function POST(request: Request) {
     await drive.permissions.create({
       fileId: fileId!,
       requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
     });
 
     // --- DATABASE LOGIC ---
